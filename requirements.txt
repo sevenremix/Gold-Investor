@@ -1,7 +1,6 @@
-finnhub-python>=2.4.15
-akshare>=1.12.91
-pandas-ta>=0.3.14b0
-pandas-datareader>=0.10.0
-requests>=2.31.0
-pandas>=2.0.0
-streamlit>=1.30.0
+streamlit
+pandas
+requests
+yfinance
+pandas-ta
+pandas-datareader
