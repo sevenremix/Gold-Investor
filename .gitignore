@@ -1,6 +1,5 @@
 # Project specific ignores
 api_keys.json
-strategy_config.json
 gold_data_log.md
 *.gsheet
 

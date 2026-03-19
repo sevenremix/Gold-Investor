@@ -1,0 +1,23 @@
+{
+    "tips_neutral": 1.5,
+    "tips_range": 2.0,
+    "sizing_tips_weight": 0.6,
+    "sizing_momentum_weight": 0.4,
+    "rsi_blend": 0.6,
+    "j_blend": 0.4,
+    "weight_fx": 40,
+    "weight_sge": 40,
+    "weight_friction": 20,
+    "cnh_ma_period": 200,
+    "sge_clip_min": -3.0,
+    "sge_clip_max": 5.0,
+    "friction_clip": 2.0,
+    "fx_dev_clip": 5.0,
+    "sge_high_override": 4.0,
+    "sge_low_override": -1.5,
+    "rsi_overbought": 85.0,
+    "rsi_oversold": 20.0,
+    "j_overbought": 100.0,
+    "j_oversold": -10.0,
+    "fx_swap_cost_pct": 0.4
+}
