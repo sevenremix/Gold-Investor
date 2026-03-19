@@ -22,7 +22,7 @@ import pandas as pd
 import numpy as np
 import requests
 from bs4 import BeautifulSoup
-import pandas_datareader.data as web
+import io
 
 def _calc_rsi(series: pd.Series, period: int = 9) -> pd.Series:
     """Calculate RSI using Wilder's Smoothing (MMA/RMA)"""
@@ -67,10 +67,8 @@ try:
 except ImportError:
     ak = None
 
-try:
-    import pandas_datareader.data as pdr
-except ImportError:
-    pdr = None
+# pandas_datareader is no longer used.
+
 
 try:
     import yfinance as yf
@@ -233,19 +231,18 @@ class DataFetcher:
             self.errors.append(f"Sina domestic data error: {e}")
 
     def _fetch_fred_macro(self, data: MarketData):
-        if not pdr: return
-        
+        """Fetch 10-Year TIPS Yield from FRED via CSV download."""
         try:
-            # Fetch last 30 days to ensure we get the latest published yield
-            end_date = datetime.now()
-            start_date = end_date - pd.Timedelta(days=30)
-            df_tips = pdr.DataReader('DFII10', 'fred', start_date, end_date)
-            
-            if not df_tips.empty:
-                # Drop NaNs and get latest
-                df_clean = df_tips.dropna()
-                if not df_clean.empty:
-                    data.tips_yield = float(df_clean.iloc[-1]['DFII10'])
+            url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFII10"
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                df = pd.read_csv(io.StringIO(resp.text))
+                if not df.empty and 'DFII10' in df.columns:
+                    # Filter out '.' which FRED uses for nulls
+                    df = df[df['DFII10'] != '.']
+                    if not df.empty:
+                        latest_val = float(df.iloc[-1]['DFII10'])
+                        data.tips_yield = latest_val
         except Exception as e:
             self.errors.append(f"FRED TIPS error: {e}")
 
