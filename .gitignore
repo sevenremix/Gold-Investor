@@ -1,0 +1,28 @@
+# Project specific ignores
+api_keys.json
+strategy_config.json
+gold_data_log.md
+*.gsheet
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+env/
+venv/
+ENV/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Agent specific
+.gemini/
+brain/
+/tmp/
+*.webp
+*.png
+*.mp4
