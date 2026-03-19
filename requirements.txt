@@ -2,5 +2,5 @@ streamlit
 pandas
 requests
 yfinance
-pandas-ta
 pandas-datareader
+numpy
