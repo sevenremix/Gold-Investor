@@ -19,7 +19,33 @@ from datetime import datetime
 from typing import Optional
 
 import pandas as pd
+import numpy as np
 import requests
+from bs4 import BeautifulSoup
+import pandas_datareader.data as web
+
+def _calc_rsi(series: pd.Series, period: int = 9) -> pd.Series:
+    """Calculate RSI using Wilder's Smoothing (MMA/RMA)"""
+    delta = series.diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+    avg_gain = gain.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+def _calc_kdj(df: pd.DataFrame, n: int = 9, m1: int = 3, m2: int = 3) -> pd.Series:
+    """Calculate KDJ-J using EMA smoothing"""
+    low_min = df['low'].rolling(window=n, min_periods=n).min()
+    high_max = df['high'].rolling(window=n, min_periods=n).max()
+    rsv = (df['close'] - low_min) / (high_max - low_min) * 100
+    rsv = rsv.fillna(0)
+    # EMA smoothing corresponds to alpha = 1/m1
+    k = rsv.ewm(alpha=1/m1, adjust=False).mean()
+    d = k.ewm(alpha=1/m2, adjust=False).mean()
+    j = 3 * k - 2 * d
+    return j
+
 from gold_engine import MarketData
 
 # Lazy imports for optional dependencies to avoid crashing if missing
@@ -29,9 +55,12 @@ except ImportError:
     finnhub = None
 
 try:
-    import pandas_ta as ta
+    # pandas_ta is no longer used directly, but its import might be kept for other reasons
+    # or removed if it's truly not needed anywhere else.
+    # For this change, we are replacing its usage with custom functions.
+    pass
 except ImportError:
-    ta = None
+    pass
 
 try:
     import akshare as ak
@@ -119,7 +148,7 @@ class DataFetcher:
             self.errors.append(f"yfinance CNH error: {e}")
 
     def _fetch_technical_indicators(self, data: MarketData):
-        if not yf or not ta: return
+        if not yf: return
         
         # --- yfinance for XAU Historical (last 3 months) ---
         try:
@@ -128,15 +157,19 @@ class DataFetcher:
                 if isinstance(df_yf.columns, pd.MultiIndex):
                     df_yf.columns = df_yf.columns.get_level_values(0)
                 df_yf.rename(columns=str.lower, inplace=True)
-                
-                rsi = df_yf.ta.rsi(length=14)
-                if rsi is not None and not rsi.empty:
-                    data.rsi_14 = float(rsi.iloc[-1])
-                    
-                kdj_df = df_yf.ta.kdj(length=9, signal=3) 
-                if kdj_df is not None and not kdj_df.empty:
-                    j_col = [c for c in kdj_df.columns if c.startswith('J_')][0]
-                    data.kdj_j = float(kdj_df[j_col].iloc[-1])
+                # Technical Indicators
+                try:
+                    # RSI(9)
+                    rsi = _calc_rsi(df_yf['close'], period=9)
+                    if rsi is not None and not rsi.empty and not pd.isna(rsi.iloc[-1]):
+                        data.rsi_14 = float(rsi.iloc[-1])
+                        
+                    # KDJ J value (9, 3, 3)
+                    j_vals = _calc_kdj(df_yf, n=9, m1=3, m2=3)
+                    if j_vals is not None and not j_vals.empty and not pd.isna(j_vals.iloc[-1]):
+                        data.kdj_j = float(j_vals.iloc[-1])
+                except Exception as e:
+                    self.errors.append(f"Indicator calc error: {e}")
         except Exception as e:
             self.errors.append(f"yfinance XAU historical error: {e}")
 
