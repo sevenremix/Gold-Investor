@@ -187,10 +187,13 @@ class DataFetcher:
             self.errors.append(f"yfinance CNH MA200 error: {e}")
 
     def _fetch_sina_domestic_data(self, data: MarketData):
-        """Fetch Spot Gold, 518660, and SGE Au(T+D) from Sina Finance real-time HQ API."""
+        """Fetch Spot Gold, 518660, and SGE Au9999 from Sina Finance real-time HQ API."""
         fetched_iopv = False
+        nav_t1 = 0.0
+        au_prev_close = 0.0
+        
         try:
-            url = "http://hq.sinajs.cn/list=hf_XAU,sh518660,gds_AUTD"
+            url = "http://hq.sinajs.cn/list=hf_XAU,sh518660,gds_AU9999,f_518660"
             headers = {"Referer": "http://finance.sina.com.cn"}
             resp = requests.get(url, headers=headers, timeout=5)
             if resp.status_code == 200:
@@ -200,32 +203,38 @@ class DataFetcher:
                         content = line.split('="')[1].split('";')[0]
                         parts = content.split(',')
                         if len(parts) > 8:
-                            # Index 3 is current price, 8 is IOPV
                             price = float(parts[3])
-                            iopv = float(parts[8])
+                            # Index 8 is volume for A-shares, not IOPV.
                             if price > 0: data.price_518660 = price
-                            if iopv > 0 and 0.5 * price < iopv < 1.5 * price:
-                                data.iopv_518660 = iopv
-                                fetched_iopv = True
                     elif "hf_XAU" in line and '="' in line:
                         content = line.split('="')[1].split('";')[0]
                         parts = content.split(',')
                         if len(parts) > 0:
-                            # Index 0 is the current London spot price
                             spot_price = float(parts[0])
                             if spot_price > 0: data.xau_usd = spot_price
-                    elif "gds_AUTD" in line and '="' in line:
+                    elif "gds_AU9999" in line and '="' in line:
                         content = line.split('="')[1].split('";')[0]
                         parts = content.split(',')
                         if len(parts) > 5:
-                            # Index 0 or 3 usually contains the current match price for AUTD
                             autd_price = float(parts[0]) 
                             if autd_price > 0:
                                 data.sge_au9999 = autd_price
+                                au_prev_close = float(parts[2])
+                    elif "f_518660" in line and '="' in line:
+                        content = line.split('="')[1].split('";')[0]
+                        parts = content.split(',')
+                        if len(parts) > 1:
+                            nav_t1 = float(parts[1])
                                 
-            # Fallback: if Sina doesn't provide valid IOPV, approximate it from Au9999
-            if not fetched_iopv and data.sge_au9999 > 0:
-                data.iopv_518660 = round(data.sge_au9999 / 100, 4)
+            # Smart Fallback: Dynamic Proportional Tracking
+            if not fetched_iopv:
+                if nav_t1 > 0 and au_prev_close > 0 and data.sge_au9999 > 0:
+                    # Real-time IOPV = (T-1 NAV) * (Current Au9999 / Yesterday's Au9999 Close)
+                    # This perfectly preserves the exact historical tracking error and fee decay.
+                    data.iopv_518660 = round(nav_t1 * (data.sge_au9999 / au_prev_close), 4)
+                elif data.sge_au9999 > 0:
+                    # Last resort fallback if ETF metadata is missing
+                    data.iopv_518660 = round(data.sge_au9999 / 100, 4)
                 
         except Exception as e:
             self.errors.append(f"Sina domestic data error: {e}")
