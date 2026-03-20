@@ -171,20 +171,26 @@ class DataFetcher:
         except Exception as e:
             self.errors.append(f"yfinance XAU historical error: {e}")
 
-        # --- yfinance for USD/CNH MA200 (last 1 year) ---
+        # --- FRED for USD/CNY MA200 (last 1 year) ---
         try:
-            df_cnh_yf = yf.download("CNH=X", period="1y", progress=False)
-            if not df_cnh_yf.empty:
-                if isinstance(df_cnh_yf.columns, pd.MultiIndex):
-                    df_cnh_yf.columns = df_cnh_yf.columns.get_level_values(0)
-                df_cnh_yf.rename(columns=str.lower, inplace=True)
-                if len(df_cnh_yf) > 0:
-                    # If less than 200 days, just use the mean of available data
-                    window = min(200, len(df_cnh_yf))
-                    ma200 = df_cnh_yf['close'].rolling(window=window).mean()
-                    data.usd_cnh_ma200 = float(ma200.iloc[-1])
+            url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DEXCHUS"
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                df_cnh = pd.read_csv(io.StringIO(resp.text))
+                if not df_cnh.empty and 'DEXCHUS' in df_cnh.columns:
+                    # Filter out '.' which FRED uses for nulls/holidays
+                    df_cnh = df_cnh[df_cnh['DEXCHUS'] != '.']
+                    if not df_cnh.empty:
+                        df_cnh['DEXCHUS'] = pd.to_numeric(df_cnh['DEXCHUS'], errors='coerce')
+                        df_cnh = df_cnh.dropna(subset=['DEXCHUS'])
+                        # We only need the last 300 rows to calculate a safe 200-day SMA
+                        df_cnh = df_cnh.tail(300)
+                        if len(df_cnh) > 0:
+                            window = min(200, len(df_cnh))
+                            ma200 = df_cnh['DEXCHUS'].rolling(window=window).mean()
+                            data.usd_cnh_ma200 = float(ma200.iloc[-1])
         except Exception as e:
-            self.errors.append(f"yfinance CNH MA200 error: {e}")
+            self.errors.append(f"FRED CNH MA200 error: {e}")
 
     def _fetch_sina_domestic_data(self, data: MarketData):
         """Fetch Spot Gold, 518660, and SGE Au9999 from Sina Finance real-time HQ API."""
