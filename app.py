@@ -583,44 +583,73 @@ def main():
     # --- Sidebar Config ---
     cfg = render_sidebar_config()
 
-    # --- Market Data Input ---
-    data = render_market_data_input()
+    # --- Tabs ---
+    tab_main, tab_premium = st.tabs(["🎯 Allocation Engine", "📈 SGE Premium Trend"])
 
-    # --- Compute ---
-    engine = GoldAllocator(cfg)
-    result, derived = engine.allocate(data)
+    with tab_main:
+        # --- Market Data Input ---
+        data = render_market_data_input()
 
-    # --- Derived Metrics ---
-    render_derived_metrics(derived, data)
+        # --- Compute ---
+        engine = GoldAllocator(cfg)
+        result, derived = engine.allocate(data)
 
-    # --- Allocation Result ---
-    render_allocation_result(result, cfg)
+        # --- Derived Metrics ---
+        render_derived_metrics(derived, data)
 
-    # --- Log & Save Button ---
-    st.markdown("---")
-    col_log, col_time = st.columns([3, 1])
+        # --- Allocation Result ---
+        render_allocation_result(result, cfg)
 
-    with col_time:
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        st.markdown(f"""
-        <div style="text-align:right; color:#8892b0; padding-top:8px; font-size:0.85rem;">
-            ⏱ {ts}
-        </div>
-        """, unsafe_allow_html=True)
+        # --- Log & Save Button ---
+        st.markdown("---")
+        col_log, col_time = st.columns([3, 1])
 
-    with col_log:
-        if st.button("📝 Log Data & Save to MD", use_container_width=True):
-            try:
-                log_to_markdown(LOG_PATH, data, derived, result, ts)
-                st.success(f"✅ Data logged at {ts} → `gold_data_log.md`")
-            except Exception as e:
-                st.error(f"❌ Failed to log: {e}")
+    with tab_premium:
+        st.markdown('<div class="section-hdr">📈 沪伦溢价率历史走势 (SGE Premium Trend)</div>', unsafe_allow_html=True)
+        st.caption("基于 518660.SS 日线收盘价反推国内金价，对比 COMEX GC=F 国际金价，计算沪伦溢价率的历史走势。叠加 30 日移动均线与 ±2σ 布林带。")
+        
+        if st.button("📡 Fetch Historical Premium Data", use_container_width=True, type="primary", key="btn_fetch_premium"):
+            with st.spinner("正在从 Yahoo Finance 拉取 6 个月历史数据，请稍候..."):
+                fetcher = DataFetcher()
+                try:
+                    df_hist = fetcher.fetch_sge_premium_history(period="6mo")
+                    if df_hist.empty:
+                        st.error("❌ 未能获取到有效的历史数据。")
+                        if fetcher.errors:
+                            for err in fetcher.errors:
+                                st.write(f"- {err}")
+                    else:
+                        st.session_state["df_premium_history"] = df_hist
+                        st.success(f"✅ 成功获取 {len(df_hist)} 个交易日的溢价数据！")
+                except Exception as e:
+                    st.error(f"❌ 拉取失败: {e}")
+        
+        if "df_premium_history" in st.session_state and not st.session_state.df_premium_history.empty:
+            st.line_chart(st.session_state.df_premium_history)
+        else:
+            st.info("💡 请点击上方按钮获取历史溢价数据。")
 
-    # --- Data Log Preview ---
-    if os.path.exists(LOG_PATH):
-        with st.expander("📋 View Data Log (gold_data_log.md)", expanded=False):
-            with open(LOG_PATH, "r", encoding="utf-8") as f:
-                st.markdown(f.read())
+        with col_time:
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            st.markdown(f"""
+            <div style="text-align:right; color:#8892b0; padding-top:8px; font-size:0.85rem;">
+                ⏱ {ts}
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col_log:
+            if st.button("📝 Log Data & Save to MD", use_container_width=True):
+                try:
+                    log_to_markdown(LOG_PATH, data, derived, result, ts)
+                    st.success(f"✅ Data logged at {ts} → `gold_data_log.md`")
+                except Exception as e:
+                    st.error(f"❌ Failed to log: {e}")
+
+        # --- Data Log Preview ---
+        if os.path.exists(LOG_PATH):
+            with st.expander("📋 View Data Log (gold_data_log.md)", expanded=False):
+                with open(LOG_PATH, "r", encoding="utf-8") as f:
+                    st.markdown(f.read())
 
 
 if __name__ == "__main__":

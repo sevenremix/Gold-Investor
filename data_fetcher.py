@@ -275,6 +275,70 @@ class DataFetcher:
         except Exception as e:
             self.errors.append(f"FRED US10Y error: {e}")
 
+    def fetch_sge_premium_history(self, period="3mo") -> pd.DataFrame:
+        """
+        Fetch historical data to compute the onshore gold premium trend.
+        Uses yfinance as the primary robust source.
+        Returns a DataFrame with ['SGE Premium (%)', '30d MA', 'Upper (+2σ)', 'Lower (-2σ)']
+        """
+        df_result = pd.DataFrame()
+        if not yf:
+            return df_result
+            
+        try:
+            # 1. Fetch Intl Gold (GC=F)
+            df_gc = yf.download("GC=F", period=period, progress=False)
+            if isinstance(df_gc.columns, pd.MultiIndex):
+                df_gc.columns = df_gc.columns.get_level_values(0)
+            df_gc.columns = [c.lower() for c in df_gc.columns]
+            
+            # 2. Fetch USD/CNY (CNH=X is currently broken on Yahoo Finance returning only 1 row)
+            df_cnh = yf.download("USDCNY=X", period=period, progress=False)
+            if isinstance(df_cnh.columns, pd.MultiIndex):
+                df_cnh.columns = df_cnh.columns.get_level_values(0)
+            df_cnh.columns = [c.lower() for c in df_cnh.columns]
+            
+            # 3. Fetch Domestic proxy (518660.SS)
+            df_sh = yf.download("518660.SS", period=period, progress=False)
+            if isinstance(df_sh.columns, pd.MultiIndex):
+                df_sh.columns = df_sh.columns.get_level_values(0)
+            df_sh.columns = [c.lower() for c in df_sh.columns]
+            
+            # Create explicit copies to safely modify indices
+            s_xau = df_gc['close'].copy()
+            s_cnh = df_cnh['close'].copy()
+            s_dom = (df_sh['close'] * 100).copy()  # Convert ETF price to approx Au9999 price (CNY/g)
+            
+            # 4. Align across different trading calendars
+            # Normalize timezone: yfinance returns tz-aware for some tickers (CNH=X), tz-naive for others (GC=F).
+            # Strip all timezones so pd.concat can join the indices safely.
+            s_xau.index = s_xau.index.tz_localize(None) if s_xau.index.tz is not None else s_xau.index
+            s_cnh.index = s_cnh.index.tz_localize(None) if s_cnh.index.tz is not None else s_cnh.index
+            s_dom.index = s_dom.index.tz_localize(None) if s_dom.index.tz is not None else s_dom.index
+            
+            # US and China markets have different holidays/weekends.
+            # ffill() carries the last known price forward across gaps.
+            df = pd.concat([s_xau, s_cnh, s_dom], axis=1, keys=['xau', 'cnh', 'dom'])
+            df = df.ffill().dropna()  # ffill first, then drop only leading NaN rows
+            
+            if df.empty:
+                return df_result
+            
+            df['intl_cny'] = df['xau'] * df['cnh'] / 31.1035
+            df['SGE Premium (%)'] = (df['dom'] / df['intl_cny'] - 1) * 100
+            
+            # Compute 30-day MA and Bollinger Bands
+            df['30d MA'] = df['SGE Premium (%)'].rolling(window=30, min_periods=5).mean()
+            std = df['SGE Premium (%)'].rolling(window=30, min_periods=5).std()
+            df['Upper (+2σ)'] = df['30d MA'] + 2 * std
+            df['Lower (-2σ)'] = df['30d MA'] - 2 * std
+            
+            return df[['SGE Premium (%)', '30d MA', 'Upper (+2σ)', 'Lower (-2σ)']].dropna()
+            
+        except Exception as e:
+            self.errors.append(f"Historical premium fetch error: {e}")
+            return df_result
+
 
 if __name__ == "__main__":
     print("Testing DataFetcher...")
