@@ -237,6 +237,7 @@ class DataFetcher:
                 if nav_t1 > 0 and au_prev_close > 0 and data.sge_au9999 > 0:
                     # Real-time IOPV = (T-1 NAV) * (Current Au9999 / Yesterday's Au9999 Close)
                     # This perfectly preserves the exact historical tracking error and fee decay.
+                    # round(..., 4): 保留4位小数，与518660的0.0001元市场报价精度对齐，防止引入无意义的浮点噪声
                     data.iopv_518660 = round(nav_t1 * (data.sge_au9999 / au_prev_close), 4)
                 elif data.sge_au9999 > 0:
                     # Last resort fallback if ETF metadata is missing
