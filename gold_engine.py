@@ -101,6 +101,8 @@ class MarketData:
 
     # --- Macro ---
     tips_yield: float = 0.0    # 美国10年期TIPS收益率 DFII10 (%)
+    us10y: float = 0.0         # 美国10年期国债名义收益率 DGS10 (%) - Ref Only
+
 
     # --- Technicals ---
     rsi_14: float = 50.0       # XAU/USD RSI(14)
@@ -367,7 +369,9 @@ class GoldAllocator:
             f"  USD/CNH:        {data.usd_cnh:.4f}",
             f"  USD/CNH MA200:  {data.usd_cnh_ma200:.4f}",
             f"  TIPS Yield:     {data.tips_yield:.2f}%",
+            f"  US10Y (Ref):    {data.us10y:.2f}%",
             f"  RSI(14):        {data.rsi_14:.1f}",
+
             f"  KDJ-J:          {data.kdj_j:.1f}",
             "",
             "【衍生指标】",
@@ -414,7 +418,7 @@ class GoldAllocator:
 
 MD_HEADER = (
     "| Timestamp | 518660 | IOPV | IAUM | XAU/USD | Au9999 | USD/CNH | "
-    "TIPS% | RSI | J | SGE溢价% | 摩擦% | FX偏离% | R分 | 仓位系数 | "
+    "TIPS% | US10Y | RSI | J | SGE溢价% | 摩擦% | FX偏离% | R分 | 仓位系数 | "
     "IAUM% | 518660% | 覆盖 |\n"
     "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
 )
@@ -459,6 +463,7 @@ def log_to_markdown(
         f"| {data.sge_au9999:.2f} "
         f"| {data.usd_cnh:.4f} "
         f"| {data.tips_yield:.2f} "
+        f"| {data.us10y:.2f} "
         f"| {data.rsi_14:.1f} "
         f"| {data.kdj_j:.1f} "
         f"| {derived.sge_premium_pct:+.2f} "

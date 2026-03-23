@@ -246,20 +246,33 @@ class DataFetcher:
             self.errors.append(f"Sina domestic data error: {e}")
 
     def _fetch_fred_macro(self, data: MarketData):
-        """Fetch 10-Year TIPS Yield from FRED via CSV download."""
+        """Fetch TIPS Yield (DFII10) and US10Y (DGS10) from FRED via CSV."""
+        # 1. TIPS Yield (DFII10)
         try:
-            url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFII10"
-            resp = requests.get(url, timeout=10)
+            url_tips = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFII10"
+            resp = requests.get(url_tips, timeout=10)
             if resp.status_code == 200:
                 df = pd.read_csv(io.StringIO(resp.text))
                 if not df.empty and 'DFII10' in df.columns:
-                    # Filter out '.' which FRED uses for nulls
                     df = df[df['DFII10'] != '.']
                     if not df.empty:
-                        latest_val = float(df.iloc[-1]['DFII10'])
-                        data.tips_yield = latest_val
+                        data.tips_yield = float(df.iloc[-1]['DFII10'])
         except Exception as e:
             self.errors.append(f"FRED TIPS error: {e}")
+
+        # 2. US10Y (DGS10) - Reference Only
+        try:
+            url_us10y = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10"
+            resp = requests.get(url_us10y, timeout=10)
+            if resp.status_code == 200:
+                df = pd.read_csv(io.StringIO(resp.text))
+                if not df.empty and 'DGS10' in df.columns:
+                    df = df[df['DGS10'] != '.']
+                    if not df.empty:
+                        # We use a custom attribute in data object for US10Y
+                        setattr(data, 'us10y', float(df.iloc[-1]['DGS10']))
+        except Exception as e:
+            self.errors.append(f"FRED US10Y error: {e}")
 
 
 if __name__ == "__main__":

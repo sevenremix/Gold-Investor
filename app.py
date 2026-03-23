@@ -49,17 +49,18 @@ st.markdown("""
 <style>
     /* ── Dark theme overrides ── */
     .stApp {
-        background-color: #0e1117;
+        background-color: #0b0f19;
     }
 
     /* ── Metric cards ── */
     div[data-testid="stMetric"] {
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border: 1px solid #2a2a4a;
+        background: linear-gradient(135deg, #151d2c 0%, #111827 100%);
+        border: 1px solid #1f2937;
         border-radius: 12px;
         padding: 16px 20px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
     }
+
     div[data-testid="stMetric"] label {
         color: #8892b0 !important;
         font-size: 0.78rem !important;
@@ -124,9 +125,10 @@ st.markdown("""
 
     /* ── Sidebar styling ── */
     section[data-testid="stSidebar"] {
-        background-color: #0a192f;
-        border-right: 1px solid #233554;
+        background-color: #060910;
+        border-right: 1px solid #111827;
     }
+
     section[data-testid="stSidebar"] .stMarkdown h1,
     section[data-testid="stSidebar"] .stMarkdown h2,
     section[data-testid="stSidebar"] .stMarkdown h3 {
@@ -139,7 +141,28 @@ st.markdown("""
         background: linear-gradient(90deg, #64ffda, #00bcd4);
     }
 
+    /* ── Button & Alert Overrides for Dark Mode ── */
+    div[data-testid="stButton"] button {
+        background-color: #1a1a2e !important;
+        color: #64ffda !important;
+        border: 1px solid #64ffda44 !important;
+        border-radius: 8px !important;
+        transition: all 0.3s ease;
+    }
+    div[data-testid="stButton"] button:hover {
+        background-color: #64ffda22 !important;
+        border-color: #64ffda !important;
+    }
+
+    /* Success box (st.success) override */
+    div[data-testid="stNotification"] {
+        background-color: rgba(22, 101, 52, 0.1) !important;
+        border: 1px solid rgba(22, 101, 52, 0.3) !important;
+        color: #4ade80 !important;
+    }
+
     /* ── No-buy banner ── */
+
     .nobuy-banner {
         background: linear-gradient(135deg, #b71c1c33 0%, #d32f2f22 100%);
         border: 2px solid #ef5350;
@@ -286,92 +309,101 @@ def render_market_data_input() -> MarketData:
         st.session_state.mkt_data = MarketData(
             price_518660=5.3500, iopv_518660=5.3400, price_iaum=53.0000,
             xau_usd=3020.00, sge_au9999=710.00, usd_cnh=7.2500,
-            usd_cnh_ma200=7.2200, tips_yield=1.83, rsi_14=52.0, kdj_j=48.0
+            usd_cnh_ma200=7.2200, tips_yield=1.83, us10y=4.25, rsi_14=52.0, kdj_j=48.0
         )
 
-    col_btn, _ = st.columns([1, 3])
-    with col_btn:
-        if st.button("🔄 Fetch Live Data", use_container_width=True, type="primary"):
-            with st.spinner("Fetching data from yfinance, Akshare, FRED..."):
-                fetcher = DataFetcher()
-                # Pass current state as fallback so failed APIs keep previous values
-                new_data = fetcher.fetch_all(fallback_data=st.session_state.mkt_data)
-                
-                # Update the dataclass
-                st.session_state.mkt_data = new_data
-                
-                # CRITICAL: Streamlit widgets with 'key' ignore 'value=' changes on re-runs.
-                # We MUST overwrite the exact session_state keys to force the UI to update.
-                st.session_state["price_518660"] = float(new_data.price_518660)
-                st.session_state["iopv_518660"] = float(new_data.iopv_518660)
-                st.session_state["price_iaum"] = float(new_data.price_iaum)
-                st.session_state["xau_usd"] = float(new_data.xau_usd)
-                st.session_state["sge_au9999"] = float(new_data.sge_au9999)
-                st.session_state["usd_cnh"] = float(new_data.usd_cnh)
-                st.session_state["usd_cnh_ma200"] = float(new_data.usd_cnh_ma200)
-                st.session_state["tips_yield"] = float(new_data.tips_yield)
-                st.session_state["rsi_14"] = float(new_data.rsi_14)
-                st.session_state["kdj_j"] = float(new_data.kdj_j)
 
-                if fetcher.errors:
-                    st.warning("⚠️ Some APIs failed. Showing cached/fallback data for failed fields.")
-                    with st.expander("Show Details"):
-                        for err in fetcher.errors:
-                            st.write(f"- {err}")
-                else:
-                    st.success("✅ All data fetched successfully!")
+    # Fetch button row (Stretch mode)
+    if st.button("🔄 Fetch Live Data", use_container_width=True, type="primary"):
+        with st.spinner("Fetching data from yfinance, Akshare, FRED..."):
+            fetcher = DataFetcher()
+            # Pass current state as fallback so failed APIs keep previous values
+            new_data = fetcher.fetch_all(fallback_data=st.session_state.mkt_data)
+            
+            # Update the dataclass
+            st.session_state.mkt_data = new_data
+            
+            # CRITICAL: Streamlit widgets with 'key' ignore 'value=' changes on re-runs.
+            # We MUST overwrite the exact session_state keys to force the UI to update.
+            st.session_state["price_518660"] = float(new_data.price_518660)
+            st.session_state["iopv_518660"] = float(new_data.iopv_518660)
+            st.session_state["price_iaum"] = float(new_data.price_iaum)
+            st.session_state["xau_usd"] = float(new_data.xau_usd)
+            st.session_state["sge_au9999"] = float(new_data.sge_au9999)
+            st.session_state["usd_cnh"] = float(new_data.usd_cnh)
+            st.session_state["usd_cnh_ma200"] = float(new_data.usd_cnh_ma200)
+            st.session_state["tips_yield"] = float(new_data.tips_yield)
+            st.session_state["us10y"] = float(getattr(new_data, 'us10y', 0.0))
+            st.session_state["rsi_14"] = float(new_data.rsi_14)
+            st.session_state["kdj_j"] = float(new_data.kdj_j)
+
+            if fetcher.errors:
+                st.warning("⚠️ Some APIs failed. Showing cached/fallback data for failed fields.")
+                with st.expander("Show Details"):
+                    for err in fetcher.errors:
+                        st.write(f"- {err}")
+            else:
+                st.success("✅ All data fetched successfully!")
+
+
 
     data = MarketData()
 
-    # --- Row 1: 518660 ---
-    col1, col2, col3 = st.columns(3)
+    # --- Row 1: Macro & FX Basis (4 cols) ---
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
-        data.price_518660 = st.number_input(
-            "518660 现价 (CNY)", step=0.0010,
-            format="%.4f", key="price_518660")
-    with col2:
-        data.iopv_518660 = st.number_input(
-            "518660 IOPV (CNY)", step=0.0010,
-            format="%.4f", key="iopv_518660")
-    with col3:
-        data.price_iaum = st.number_input(
-            "IAUM 现价 (USD)", step=0.0100,
-            format="%.4f", key="price_iaum")
-
-    # --- Row 2: Gold prices ---
-    col4, col5, col6 = st.columns(3)
-    with col4:
         data.xau_usd = st.number_input(
             "XAU/USD 国际金价", step=1.00,
             format="%.2f", key="xau_usd")
-    with col5:
+    with col2:
         data.sge_au9999 = st.number_input(
             "Au9999 上金所 (CNY/克)", step=0.50,
             format="%.2f", key="sge_au9999")
-    with col6:
+    with col3:
         data.usd_cnh = st.number_input(
             "USD/CNH 离岸汇率", step=0.0010,
             format="%.4f", key="usd_cnh")
-
-    # --- Row 3: Macro & Technicals ---
-    col7, col8, col9, col10 = st.columns(4)
-    with col7:
+    with col4:
         data.usd_cnh_ma200 = st.number_input(
             "USD/CNH MA200", step=0.0010,
             format="%.4f", key="usd_cnh_ma200")
-    with col8:
+
+    # --- Row 2: Macro & Technicals (4 cols) ---
+    col5, col6, col7, col8 = st.columns(4)
+    with col5:
         data.tips_yield = st.number_input(
             "TIPS Yield (%)", step=0.01,
             format="%.2f", key="tips_yield")
-    with col9:
+    with col6:
+        data.us10y = st.number_input(
+            "US10Y (Reference)", step=0.01,
+            format="%.2f", key="us10y",
+            help="10年期美债名义收益率，仅供参考，不参与分仓计算")
+    with col7:
         data.rsi_14 = st.number_input(
             "RSI(14)", step=0.5,
             format="%.1f", key="rsi_14",
             min_value=0.0, max_value=100.0)
-    with col10:
+    with col8:
         data.kdj_j = st.number_input(
             "KDJ-J", step=1.0,
             format="%.1f", key="kdj_j")
+
+    # --- Row 3: Execution Instruments (3 cols) ---
+    col9, col10, col11 = st.columns(3)
+    with col9:
+        data.price_518660 = st.number_input(
+            "518660 现价 (CNY)", step=0.0010,
+            format="%.4f", key="price_518660")
+    with col10:
+        data.iopv_518660 = st.number_input(
+            "518660 IOPV (CNY)", step=0.0010,
+            format="%.4f", key="iopv_518660")
+    with col11:
+        data.price_iaum = st.number_input(
+            "IAUM 现价 (USD)", step=0.0100,
+            format="%.4f", key="price_iaum")
+
 
     return data
 
@@ -488,10 +520,22 @@ def render_allocation_result(result: AllocationResult, cfg: StrategyConfig):
         st.markdown(f"""
         <div class="layer-card">
             <div class="layer-label">Layer 1 — Position Sizing</div>
-            <div class="factor-row"><span>TIPS Factor (F₁)</span><span class="factor-val">{result.tips_score:+.3f}</span></div>
-            <div class="factor-row"><span>Momentum (F₅)</span><span class="factor-val">{result.momentum_score:+.3f}</span></div>
-            <div class="factor-row"><span>Sizing Score</span><span class="factor-val">{result.sizing_score:+.3f}</span></div>
-            <div class="factor-row" style="border:none;"><span>Multiplier</span><span class="factor-val" style="color:{sizing_color}">{result.position_multiplier:.2f}x</span></div>
+            <div class="factor-row" title="说明：实际利率得分。反映持有黄金的机会成本（负相）。&#10;公式：(TIPS_Neutral - TIPS_Current) / TIPS_Range">
+                <span style="cursor:help; border-bottom:1px dotted #8892b0;">TIPS Factor (F₁)</span>
+                <span class="factor-val">{result.tips_score:+.3f}</span>
+            </div>
+            <div class="factor-row" title="说明：动量情绪得分。反映金价超买超卖程度。负数极大值代表恐慌超卖。&#10;公式：(RSI_Norm × W_rsi) + (KDJ_Norm × W_kdj)">
+                <span style="cursor:help; border-bottom:1px dotted #8892b0;">Momentum (F₅)</span>
+                <span class="factor-val">{result.momentum_score:+.3f}</span>
+            </div>
+            <div class="factor-row" title="说明：综合买入意愿。正数代表看涨加仓，负数代表看跌减仓。&#10;公式：(F₁ × 0.6) - (F₅ × 0.4) 【注: 动量按反向算】">
+                <span style="cursor:help; border-bottom:1px dotted #8892b0;">Sizing Score</span>
+                <span class="factor-val">{result.sizing_score:+.3f}</span>
+            </div>
+            <div class="factor-row" style="border:none;" title="说明：最终仓位乘数。决定此笔交易购买的标准资金倍数。&#10;公式：1.0 + (Sizing Score × 0.5)">
+                <span style="cursor:help; border-bottom:1px dotted #8892b0;">Multiplier</span>
+                <span class="factor-val" style="color:{sizing_color}">{result.position_multiplier:.2f}x</span>
+            </div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -499,10 +543,22 @@ def render_allocation_result(result: AllocationResult, cfg: StrategyConfig):
         st.markdown(f"""
         <div class="layer-card">
             <div class="layer-label">Layer 2 — Vehicle Routing</div>
-            <div class="factor-row"><span>F₂ FX × {cfg.weight_fx}</span><span class="factor-val">{result.f2_fx:+.3f} → {result.f2_fx * cfg.weight_fx:+.1f}</span></div>
-            <div class="factor-row"><span>F₃ SGE × {cfg.weight_sge}</span><span class="factor-val">{result.f3_sge:+.3f} → {result.f3_sge * cfg.weight_sge:+.1f}</span></div>
-            <div class="factor-row"><span>F₄ Friction × {cfg.weight_friction}</span><span class="factor-val">{result.f4_friction:+.3f} → {result.f4_friction * cfg.weight_friction:+.1f}</span></div>
-            <div class="factor-row" style="border:none;"><span>Routing Score R</span><span class="factor-val">{result.routing_score:+.1f}</span></div>
+            <div class="factor-row" title="说明：汇率偏离。衡量换汇买美元资产风险。负数偏向国内防守。&#10;公式：(USD_CNH / MA200 - 1) × 100 线性映射">
+                <span style="cursor:help; border-bottom:1px dotted #8892b0;">F₂ FX × {cfg.weight_fx}</span>
+                <span class="factor-val">{result.f2_fx:+.3f} → {result.f2_fx * cfg.weight_fx:+.1f}</span>
+            </div>
+            <div class="factor-row" title="说明：沪伦溢价纠偏。衡量国内金价相对国际的溢价。负数偏向国内。&#10;公式：(Au9999 / 国际价折合人民币 - 1) × 100 线性映射">
+                <span style="cursor:help; border-bottom:1px dotted #8892b0;">F₃ SGE × {cfg.weight_sge}</span>
+                <span class="factor-val">{result.f3_sge:+.3f} → {result.f3_sge * cfg.weight_sge:+.1f}</span>
+            </div>
+            <div class="factor-row" title="说明：ETF场内摩擦。衡量518660盘口折溢价率。负数代表由于折价值得抄底国内。&#10;公式：(518660现价 / IOPV - 1) × 100 线性映射">
+                <span style="cursor:help; border-bottom:1px dotted #8892b0;">F₄ Friction × {cfg.weight_friction}</span>
+                <span class="factor-val">{result.f4_friction:+.3f} → {result.f4_friction * cfg.weight_friction:+.1f}</span>
+            </div>
+            <div class="factor-row" style="border:none;" title="说明：路由总分。决定资金如何在境内外分配。&#10;公式：R = F₂*W₂ + F₃*W₃ + F₄*W₄ (R>0偏向出海, R<0偏向留守本土)">
+                <span style="cursor:help; border-bottom:1px dotted #8892b0;">Routing Score R</span>
+                <span class="factor-val">{result.routing_score:+.1f}</span>
+            </div>
         </div>
         """, unsafe_allow_html=True)
 
