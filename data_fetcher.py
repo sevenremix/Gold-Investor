@@ -221,11 +221,12 @@ class DataFetcher:
                     elif "gds_AU9999" in line and '="' in line:
                         content = line.split('="')[1].split('";')[0]
                         parts = content.split(',')
-                        if len(parts) > 5:
+                        if len(parts) > 7:
                             autd_price = float(parts[0]) 
                             if autd_price > 0:
                                 data.sge_au9999 = autd_price
-                                au_prev_close = float(parts[2])
+                                # parts[7] is yesterday's close for gds_AU9999
+                                au_prev_close = float(parts[7])
                     elif "f_518660" in line and '="' in line:
                         content = line.split('="')[1].split('";')[0]
                         parts = content.split(',')
