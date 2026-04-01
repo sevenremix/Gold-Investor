@@ -337,6 +337,12 @@ def render_market_data_input() -> MarketData:
             st.session_state["rsi_14"] = float(new_data.rsi_14)
             st.session_state["kdj_j"] = float(new_data.kdj_j)
 
+            # Store BEI historical data in session_state for the BEI tab
+            if hasattr(new_data, 'bei_history') and new_data.bei_history is not None:
+                st.session_state["bei_history"] = new_data.bei_history
+                st.session_state["bei_slope_60d"] = getattr(new_data, 'bei_slope_60d', 0.0)
+                st.session_state["bei_t_stat_60d"] = getattr(new_data, 'bei_t_stat_60d', 0.0)
+
             if fetcher.errors:
                 st.warning("⚠️ Some APIs failed. Showing cached/fallback data for failed fields.")
                 with st.expander("Show Details"):
@@ -584,7 +590,7 @@ def main():
     cfg = render_sidebar_config()
 
     # --- Tabs ---
-    tab_main, tab_premium = st.tabs(["🎯 Allocation Engine", "📈 SGE Premium Trend"])
+    tab_main, tab_premium, tab_bei = st.tabs(["🎯 Allocation Engine", "📈 SGE Premium Trend", "🏦 BEI Trend"])
 
     with tab_main:
         # --- Market Data Input ---
@@ -628,6 +634,88 @@ def main():
             st.line_chart(st.session_state.df_premium_history)
         else:
             st.info("💡 请点击上方按钮获取历史溢价数据。")
+
+    with tab_bei:
+        st.markdown('<div class="section-hdr">🏦 DFII10 vs US10Y — 通胀预期 (BEI) 趋势图</div>', unsafe_allow_html=True)
+        st.caption("基于 FRED 日频数据。BEI = US10Y(DGS10) - TIPS(DFII10)，反映市场对未来 10 年通胀的隐含预期。60 日线性回归斜率用于判断开口趋势。")
+
+        if "bei_history" in st.session_state and st.session_state.bei_history is not None and not st.session_state.bei_history.empty:
+            slope = st.session_state.get("bei_slope_60d", 0.0)
+            t_stat = st.session_state.get("bei_t_stat_60d", 0.0)
+
+            # 使用 95% 置信区间对应的临界 t 值 (对于自由度 ~58, t_critical 约等于 2.00)
+            is_significant = abs(t_stat) >= 2.00
+
+            if is_significant and slope > 0:
+                trend_str = f"📈 显著扩张中 (+{slope:.4f}/日)"
+                trend_implication = "通胀预期显著升温 (p<0.05) → 宏观面偏多黄金"
+                trend_color = "#69f0ae"
+            elif is_significant and slope < 0:
+                trend_str = f"📉 显著缩减中 ({slope:.4f}/日)"
+                trend_implication = "通胀预期显著降温 (p<0.05) → 实际利率走高，宏观面偏空黄金"
+                trend_color = "#ef5350"
+            else:
+                trend_str = f"➖ 震荡横盘 ({slope:.4f}/日)"
+                trend_implication = "趋势不具统计学显著性，市场无共识方向"
+                trend_color = "#8892b0"
+
+            st.markdown(f"""
+            <div class="alloc-box" style="text-align:center;">
+                <div class="alloc-title">BEI 60日趋势判断</div>
+                <div class="alloc-big" style="color:{trend_color};">{trend_str}</div>
+                <div class="alloc-sub">{trend_implication}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            try:
+                import plotly.graph_objects as go
+
+                df_bei = st.session_state.bei_history
+                fig = go.Figure()
+
+                # DGS10 line
+                fig.add_trace(go.Scatter(
+                    x=df_bei.index, y=df_bei['DGS10'],
+                    mode='lines',
+                    name='US10Y 名义收益率 (DGS10)',
+                    line=dict(color='#8892b0', width=1.5, dash='dot')
+                ))
+
+                # DFII10 line
+                fig.add_trace(go.Scatter(
+                    x=df_bei.index, y=df_bei['DFII10'],
+                    mode='lines',
+                    name='TIPS 实际收益率 (DFII10)',
+                    line=dict(color='#64ffda', width=1.5)
+                ))
+
+                # BEI as filled area between the two
+                fig.add_trace(go.Scatter(
+                    x=df_bei.index, y=df_bei['BEI'],
+                    mode='lines',
+                    name='BEI 盈亏平衡通胀',
+                    fill='tozeroy',
+                    fillcolor='rgba(239, 83, 80, 0.15)',
+                    line=dict(color='#ef5350', width=2)
+                ))
+
+                fig.update_layout(
+                    height=400,
+                    margin=dict(l=0, r=0, t=30, b=0),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    hovermode='x unified',
+                    yaxis_title='Yield (%)',
+                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+                    xaxis=dict(gridcolor='#233554'),
+                    yaxis=dict(gridcolor='#233554'),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            except ImportError:
+                st.line_chart(st.session_state.bei_history)
+                st.info("💡 安装 `plotly` 可获得更佳的交互式图表体验。")
+        else:
+            st.info("💡 请先在 Allocation Engine 页面点击 '🔄 Fetch Live Data' 获取 FRED 宏观数据，BEI 图表将自动加载至此处。")
 
         with col_time:
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

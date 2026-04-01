@@ -249,6 +249,9 @@ class DataFetcher:
 
     def _fetch_fred_macro(self, data: MarketData):
         """Fetch TIPS Yield (DFII10) and US10Y (DGS10) from FRED via CSV."""
+        df_tips = pd.DataFrame()
+        df_us10y = pd.DataFrame()
+        
         # 1. TIPS Yield (DFII10)
         try:
             url_tips = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFII10"
@@ -258,11 +261,16 @@ class DataFetcher:
                 if not df.empty and 'DFII10' in df.columns:
                     df = df[df['DFII10'] != '.']
                     if not df.empty:
-                        data.tips_yield = float(df.iloc[-1]['DFII10'])
+                        df['DFII10'] = pd.to_numeric(df['DFII10'])
+                        # Dynamically detect date column (FRED may use 'DATE' or 'date')
+                        date_col = df.columns[0]
+                        df[date_col] = pd.to_datetime(df[date_col])
+                        df_tips = df.set_index(date_col)
+                        data.tips_yield = float(df_tips.iloc[-1]['DFII10'])
         except Exception as e:
             self.errors.append(f"FRED TIPS error: {e}")
 
-        # 2. US10Y (DGS10) - Reference Only
+        # 2. US10Y (DGS10)
         try:
             url_us10y = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10"
             resp = requests.get(url_us10y, timeout=10)
@@ -271,10 +279,47 @@ class DataFetcher:
                 if not df.empty and 'DGS10' in df.columns:
                     df = df[df['DGS10'] != '.']
                     if not df.empty:
-                        # We use a custom attribute in data object for US10Y
-                        setattr(data, 'us10y', float(df.iloc[-1]['DGS10']))
+                        df['DGS10'] = pd.to_numeric(df['DGS10'])
+                        date_col = df.columns[0]
+                        df[date_col] = pd.to_datetime(df[date_col])
+                        df_us10y = df.set_index(date_col)
+                        setattr(data, 'us10y', float(df_us10y.iloc[-1]['DGS10']))
         except Exception as e:
             self.errors.append(f"FRED US10Y error: {e}")
+            
+        # 3. Compute BEI (Breakeven Inflation) & 60d Regression
+        if not df_tips.empty and not df_us10y.empty:
+            try:
+                # Merge the two series into one DataFrame
+                df_macro = df_us10y.join(df_tips, how='inner').dropna()
+                if len(df_macro) >= 5:
+                    df_macro['BEI'] = df_macro['DGS10'] - df_macro['DFII10']
+                    # Keep about 1 year of trading days for visualization (approx 250 days)
+                    df_macro = df_macro.tail(250)
+                    data.bei_history = df_macro[['DGS10', 'DFII10', 'BEI']].copy()
+                    
+                    # Compute 60-day regression slope and t-statistic (approx 3 months)
+                    if len(df_macro) >= 60:
+                        y = df_macro['BEI'].tail(60).values
+                        x = np.arange(len(y))
+                        slope, intercept = np.polyfit(x, y, 1)
+                        data.bei_slope_60d = float(slope)
+                        
+                        # Calculate t-statistic without scipy dependency
+                        n = len(x)
+                        y_pred = slope * x + intercept
+                        sse = np.sum((y - y_pred)**2)
+                        
+                        if sse > 0:
+                            se = np.sqrt(sse / (n - 2))  # Standard error of regression
+                            sb = se / np.sqrt(np.sum((x - np.mean(x))**2))  # Standard error of slope
+                            t_stat = slope / sb if sb > 0 else 0.0
+                        else:
+                            t_stat = 0.0
+                            
+                        setattr(data, 'bei_t_stat_60d', float(t_stat))
+            except Exception as e:
+                self.errors.append(f"BEI composite calculation error: {e}")
 
     def fetch_sge_premium_history(self, period="3mo") -> pd.DataFrame:
         """

@@ -16,8 +16,7 @@ import json
 import os
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
-from typing import Optional, Tuple, List
-
+from typing import Optional, Tuple, List, Any
 
 # ============================================================================
 #  Configuration
@@ -102,7 +101,9 @@ class MarketData:
     # --- Macro ---
     tips_yield: float = 0.0    # 美国10年期TIPS收益率 DFII10 (%)
     us10y: float = 0.0         # 美国10年期国债名义收益率 DGS10 (%) - Ref Only
-
+    bei_history: Any = None    # 历史 BEI 数据 (DataFrame 用于绘图)
+    bei_slope_60d: float = 0.0 # BEI 的 60 日线性回归斜率
+    bei_t_stat_60d: float = 0.0 # BEI 60天回归斜率的 t-statistic
 
     # --- Technicals ---
     rsi_14: float = 50.0       # XAU/USD RSI(14)
