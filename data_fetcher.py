@@ -99,6 +99,17 @@ def _get_api_keys() -> dict:
                     keys["fred_api_key"] = cfg["fred_api_key"]
         except Exception:
             pass
+
+    # Streamlit Cloud integration (prioritize st.secrets if available)
+    try:
+        import streamlit as st
+        # Use getattr to safely check secrets as it might not be available in all contexts
+        secrets = getattr(st, "secrets", {})
+        if "fred_api_key" in secrets:
+            keys["fred_api_key"] = secrets["fred_api_key"]
+    except Exception:
+        pass
+        
     return keys
 
 
@@ -439,13 +450,19 @@ class DataFetcher:
         api_keys = _get_api_keys()
         fred_key = api_keys.get("fred_api_key", "").strip()
 
-        # List of proxies to try automatically, starting with None (direct)
-        proxies_to_try = [
-            None,
-            {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"},      # Clash
-            {"http": "http://127.0.0.1:10809", "https": "http://127.0.0.1:10809"},    # v2rayN
-            {"http": "http://127.0.0.1:1080", "https": "http://127.0.0.1:1080"},      # Shadowsocks
-        ]
+        # Decide which proxies to try based on environment
+        import streamlit as st
+        is_cloud = os.environ.get("STREAMLIT_RUNTIME_STATS_URL") or os.environ.get("STREAMLIT_SHARING")
+        
+        if is_cloud:
+            proxies_to_try = [None] # In Cloud, local proxies (127.0.0.1) are invalid
+        else:
+            proxies_to_try = [
+                None,
+                {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"},
+                {"http": "http://127.0.0.1:10809", "https": "http://127.0.0.1:10809"},
+                {"http": "http://127.0.0.1:1080", "https": "http://127.0.0.1:1080"},
+            ]
 
         df_tips = pd.DataFrame()
         df_us10y = pd.DataFrame()
@@ -457,8 +474,11 @@ class DataFetcher:
             
             for proxies in proxies_to_try:
                 try:
-                    resp_tips = requests.get(url_dfii10, proxies=proxies, timeout=10)
-                    resp_us10y = requests.get(url_dgs10, proxies=proxies, timeout=10)
+                    # Slightly longer timeout for cloud cold starts
+                    timeout = 15 if is_cloud else 10
+                    resp_tips = requests.get(url_dfii10, proxies=proxies, timeout=timeout)
+                    resp_us10y = requests.get(url_dgs10, proxies=proxies, timeout=timeout)
+                    
                     if resp_tips.status_code == 200 and resp_us10y.status_code == 200:
                         obs_tips = [o for o in resp_tips.json().get("observations", []) if o["value"] != "."]
                         obs_us10y = [o for o in resp_us10y.json().get("observations", []) if o["value"] != "."]
@@ -471,12 +491,19 @@ class DataFetcher:
                             df['DATE'] = pd.to_datetime(df['DATE'])
                             df.set_index('DATE', inplace=True)
                             
-                        # Sort index chronologically because sort_order=desc puts newest first
                         df_tips.sort_index(inplace=True)
                         df_us10y.sort_index(inplace=True)
                         success = True
                         break
-                except Exception:
+                    elif resp_tips.status_code == 403 or resp_us10y.status_code == 403:
+                        msg = "❌ FRED API Key 验证失败 (403 Forbidden)。请确认 Key 是否正确。"
+                        if msg not in self.errors: self.errors.append(msg)
+                        # No point in trying other proxies if key is wrong
+                        break
+                except Exception as e:
+                    if is_cloud:
+                        msg = f"❌ 云端 FRED 连通性异常: {e}"
+                        if msg not in self.errors: self.errors.append(msg)
                     continue
 
         # Fallback to CSV if API key not present or failed
