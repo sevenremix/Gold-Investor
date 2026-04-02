@@ -316,8 +316,19 @@ def render_market_data_input() -> MarketData:
         st.session_state.mkt_data = MarketData(
             price_518660=5.3500, iopv_518660=5.3400, price_iaum=53.0000,
             xau_usd=3020.00, sge_au9999=710.00, usd_cnh=7.2500,
-            usd_cnh_ma200=7.2200, tips_yield=1.83, us10y=4.25, rsi_14=52.0, kdj_j=48.0
+            usd_cnh_ma200=7.2200, tips_yield=1.83, us10y=4.25, rsi_14=52.0, kdj_j=48.0,
+            ndx_spot=0.0
         )
+    else:
+        if not hasattr(st.session_state.mkt_data, "ndx_spot"):
+            st.session_state.mkt_data.ndx_spot = 0.0
+        if not hasattr(st.session_state.mkt_data, "us10y"):
+            st.session_state.mkt_data.us10y = 4.30
+            
+    # Ensure individual widget keys exist for the first run to avoid 'key' vs 'value' conflict
+    for k in ["xau_usd", "sge_au9999", "usd_cnh", "usd_cnh_ma200", "tips_yield", "us10y", "rsi_14", "kdj_j", "price_518660", "iopv_518660", "price_iaum", "ndx_spot"]:
+        if k not in st.session_state:
+            st.session_state[k] = float(getattr(st.session_state.mkt_data, k, 0.0))
 
 
     # Fetch button row (Stretch mode)
@@ -339,7 +350,8 @@ def render_market_data_input() -> MarketData:
                 "KDJ": "kdj_j",
                 "518660": "price_518660",
                 "IOPV": "iopv_518660",
-                "IAUM": "price_iaum"
+                "IAUM": "price_iaum",
+                "NDX": "ndx_spot"
             }
             st.session_state["failed_fields"] = [v for k, v in error_map.items() if any(k in err for err in fetcher.errors)]
             
@@ -439,7 +451,7 @@ def render_market_data_input() -> MarketData:
     with col12:
         data.ndx_spot = st.number_input(
             get_label("Nasdaq 100 Index", "ndx_spot"), step=1.00,
-            value=float(data.ndx_spot), format="%.2f", key="ndx_spot"
+            format="%.2f", key="ndx_spot"
         )
 
 
