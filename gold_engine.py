@@ -108,6 +108,9 @@ class MarketData:
     # --- Technicals ---
     rsi_14: float = 50.0       # XAU/USD RSI(14)
     kdj_j: float = 50.0        # XAU/USD KDJ的J值
+    
+    # --- Reference Indices ---
+    ndx_spot: float = 0.0      # Nasdaq 100 Index Spot Value
 
 
 # ============================================================================

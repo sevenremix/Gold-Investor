@@ -13,6 +13,7 @@ Manual overrides are always allowed in the UI.
 """
 
 import os
+import io
 import json
 import time
 from datetime import datetime
@@ -81,13 +82,24 @@ API_KEYS_PATH = os.path.join(SCRIPT_DIR, "api_keys.json")
 
 
 def _get_api_keys() -> dict:
+    keys = {}
     if os.path.exists(API_KEYS_PATH):
         try:
             with open(API_KEYS_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
+                keys.update(json.load(f))
         except Exception:
             pass
-    return {}
+
+    config_path = os.path.join(SCRIPT_DIR, "strategy_config.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                if "fred_api_key" in cfg:
+                    keys["fred_api_key"] = cfg["fred_api_key"]
+        except Exception:
+            pass
+    return keys
 
 
 class DataFetcher:
@@ -144,6 +156,14 @@ class DataFetcher:
                 data.usd_cnh = float(val)
         except Exception as e:
             self.errors.append(f"yfinance CNH error: {e}")
+            
+        # Nasdaq 100 Spot (Reference)
+        try:
+            val = yf.Ticker("^NDX").fast_info.get("lastPrice", 0.0)
+            if val and val > 0:
+                data.ndx_spot = float(val)
+        except Exception as e:
+            self.errors.append(f"yfinance NDX error: {e}")
 
     def _fetch_technical_indicators(self, data: MarketData):
         if not yf: return
@@ -171,26 +191,49 @@ class DataFetcher:
         except Exception as e:
             self.errors.append(f"yfinance XAU historical error: {e}")
 
-        # --- FRED for USD/CNY MA200 (last 1 year) ---
-        try:
-            url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DEXCHUS"
-            resp = requests.get(url, timeout=10)
-            if resp.status_code == 200:
-                df_cnh = pd.read_csv(io.StringIO(resp.text))
-                if not df_cnh.empty and 'DEXCHUS' in df_cnh.columns:
-                    # Filter out '.' which FRED uses for nulls/holidays
-                    df_cnh = df_cnh[df_cnh['DEXCHUS'] != '.']
-                    if not df_cnh.empty:
-                        df_cnh['DEXCHUS'] = pd.to_numeric(df_cnh['DEXCHUS'], errors='coerce')
-                        df_cnh = df_cnh.dropna(subset=['DEXCHUS'])
-                        # We only need the last 300 rows to calculate a safe 200-day SMA
-                        df_cnh = df_cnh.tail(300)
-                        if len(df_cnh) > 0:
-                            window = min(200, len(df_cnh))
-                            ma200 = df_cnh['DEXCHUS'].rolling(window=window).mean()
-                            data.usd_cnh_ma200 = float(ma200.iloc[-1])
-        except Exception as e:
-            self.errors.append(f"FRED CNH MA200 error: {e}")
+        # --- USD/CNY MA200 (FRED DEXCHUS via API, fallback to yfinance CNH=X) ---
+        fetched_cnh_ma200 = False
+        api_keys = _get_api_keys()
+        fred_key = api_keys.get("fred_api_key", "").strip()
+
+        proxies_to_try = [
+            None,
+            {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"},
+            {"http": "http://127.0.0.1:10809", "https": "http://127.0.0.1:10809"},
+            {"http": "http://127.0.0.1:1080", "https": "http://127.0.0.1:1080"}
+        ]
+
+        if fred_key:
+            url_dexchus = f"https://api.stlouisfed.org/fred/series/observations?series_id=DEXCHUS&api_key={fred_key}&file_type=json&limit=250&sort_order=desc"
+            for proxies in proxies_to_try:
+                try:
+                    resp = requests.get(url_dexchus, proxies=proxies, timeout=10)
+                    if resp.status_code == 200:
+                        obs = resp.json().get("observations", [])
+                        vals = [float(o["value"]) for o in obs if o["value"] != "."]
+                        if len(vals) > 0:
+                            window = min(200, len(vals))
+                            data.usd_cnh_ma200 = round(sum(vals[:window]) / window, 4)
+                            fetched_cnh_ma200 = True
+                            break
+                except Exception:
+                    continue
+            if not fetched_cnh_ma200:
+                self.errors.append("FRED API DEXCHUS error: All proxy attempts timed out.")
+
+        if not fetched_cnh_ma200:
+            try:
+                df_cnh_hist = yf.download("CNH=X", period="1y", progress=False)
+                if isinstance(df_cnh_hist.columns, pd.MultiIndex):
+                    df_cnh_hist.columns = df_cnh_hist.columns.get_level_values(0)
+                df_cnh_hist.columns = [c.lower() for c in df_cnh_hist.columns]
+                if not df_cnh_hist.empty and 'close' in df_cnh_hist.columns:
+                    s = df_cnh_hist['close'].dropna()
+                    if len(s) > 0:
+                        window = min(200, len(s))
+                        data.usd_cnh_ma200 = float(s.rolling(window=window).mean().iloc[-1])
+            except Exception as e:
+                self.errors.append(f"yfinance CNH MA200 error: {e}")
 
     def _fetch_sina_domestic_data(self, data: MarketData):
         """Fetch Spot Gold, 518660, and SGE Au9999 from Sina Finance real-time HQ API."""
@@ -248,78 +291,80 @@ class DataFetcher:
             self.errors.append(f"Sina domestic data error: {e}")
 
     def _fetch_fred_macro(self, data: MarketData):
-        """Fetch TIPS Yield (DFII10) and US10Y (DGS10) from FRED via CSV."""
-        df_tips = pd.DataFrame()
-        df_us10y = pd.DataFrame()
-        
-        # 1. TIPS Yield (DFII10)
-        try:
-            url_tips = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFII10"
-            resp = requests.get(url_tips, timeout=10)
-            if resp.status_code == 200:
-                df = pd.read_csv(io.StringIO(resp.text))
-                if not df.empty and 'DFII10' in df.columns:
-                    df = df[df['DFII10'] != '.']
-                    if not df.empty:
-                        df['DFII10'] = pd.to_numeric(df['DFII10'])
-                        # Dynamically detect date column (FRED may use 'DATE' or 'date')
-                        date_col = df.columns[0]
-                        df[date_col] = pd.to_datetime(df[date_col])
-                        df_tips = df.set_index(date_col)
-                        data.tips_yield = float(df_tips.iloc[-1]['DFII10'])
-        except Exception as e:
-            self.errors.append(f"FRED TIPS error: {e}")
+        """
+        Fetch US10Y and TIPS Yield spot values.
+        - US10Y: Prioritize yfinance (^TNX) for REAL-TIME market yield. Fallback to FRED DGS10 (T-1 delayed).
+        - TIPS: Prioritize FRED official API (DFII10) because real TIPS yield is not live on Yahoo.
+        """
+        api_keys = _get_api_keys()
+        fred_key = api_keys.get("fred_api_key", "").strip()
 
-        # 2. US10Y (DGS10)
+        fetched_us10y = False
+        fetched_tips = False
+
+        proxies_to_try = [
+            None,
+            {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"},
+            {"http": "http://127.0.0.1:10809", "https": "http://127.0.0.1:10809"},
+            {"http": "http://127.0.0.1:1080", "https": "http://127.0.0.1:1080"}
+        ]
+
+        # 1. Fetch Real-time US10Y via yfinance
         try:
-            url_us10y = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10"
-            resp = requests.get(url_us10y, timeout=10)
-            if resp.status_code == 200:
-                df = pd.read_csv(io.StringIO(resp.text))
-                if not df.empty and 'DGS10' in df.columns:
-                    df = df[df['DGS10'] != '.']
-                    if not df.empty:
-                        df['DGS10'] = pd.to_numeric(df['DGS10'])
-                        date_col = df.columns[0]
-                        df[date_col] = pd.to_datetime(df[date_col])
-                        df_us10y = df.set_index(date_col)
-                        setattr(data, 'us10y', float(df_us10y.iloc[-1]['DGS10']))
+            us10y_spot = float(yf.Ticker("^TNX").fast_info["last_price"])
+            if us10y_spot > 0:
+                data.us10y = round(us10y_spot, 3)
+                fetched_us10y = True
         except Exception as e:
-            self.errors.append(f"FRED US10Y error: {e}")
-            
-        # 3. Compute BEI (Breakeven Inflation) & 60d Regression
-        if not df_tips.empty and not df_us10y.empty:
+            self.errors.append(f"yfinance US10Y error: {e}")
+
+        if fred_key:
+            # Fallback 1: Fetch FRED DGS10 (US10Y) if yfinance failed
+            if not fetched_us10y:
+                url_dgs10 = f"https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&api_key={fred_key}&file_type=json&limit=5&sort_order=desc"
+                for proxies in proxies_to_try:
+                    try:
+                        resp = requests.get(url_dgs10, proxies=proxies, timeout=10)
+                        if resp.status_code == 200:
+                            obs = resp.json().get("observations", [])
+                            for o in obs:
+                                if o["value"] != ".":
+                                    data.us10y = float(o["value"])
+                                    fetched_us10y = True
+                                    break
+                            if fetched_us10y:
+                                break
+                    except Exception:
+                        continue
+                if not fetched_us10y:
+                    self.errors.append("FRED API US10Y fallback error: All proxy attempts timed out.")
+
+            # 2. Fetch FRED DFII10 (TIPS) - Always use FRED for this as primary
+            url_dfii10 = f"https://api.stlouisfed.org/fred/series/observations?series_id=DFII10&api_key={fred_key}&file_type=json&limit=5&sort_order=desc"
+            for proxies in proxies_to_try:
+                try:
+                    resp = requests.get(url_dfii10, proxies=proxies, timeout=10)
+                    if resp.status_code == 200:
+                        obs = resp.json().get("observations", [])
+                        for o in obs:
+                            if o["value"] != ".":
+                                data.tips_yield = float(o["value"])
+                                fetched_tips = True
+                                break
+                        if fetched_tips:
+                            break
+                except Exception:
+                    continue
+            if not fetched_tips:
+                self.errors.append("FRED API TIPS error: All proxy attempts timed out.")
+
+        # --- Fallback if TIPS logic totally fails ---
+        if not fetched_tips and fetched_us10y:
             try:
-                # Merge the two series into one DataFrame
-                df_macro = df_us10y.join(df_tips, how='inner').dropna()
-                if len(df_macro) >= 5:
-                    df_macro['BEI'] = df_macro['DGS10'] - df_macro['DFII10']
-                    # Keep about 1 year of trading days for visualization (approx 250 days)
-                    df_macro = df_macro.tail(250)
-                    data.bei_history = df_macro[['DGS10', 'DFII10', 'BEI']].copy()
-                    
-                    # Compute 60-day regression slope and t-statistic (approx 3 months)
-                    if len(df_macro) >= 60:
-                        y = df_macro['BEI'].tail(60).values
-                        x = np.arange(len(y))
-                        slope, intercept = np.polyfit(x, y, 1)
-                        data.bei_slope_60d = float(slope)
-                        
-                        # Calculate t-statistic without scipy dependency
-                        n = len(x)
-                        y_pred = slope * x + intercept
-                        sse = np.sum((y - y_pred)**2)
-                        
-                        if sse > 0:
-                            se = np.sqrt(sse / (n - 2))  # Standard error of regression
-                            sb = se / np.sqrt(np.sum((x - np.mean(x))**2))  # Standard error of slope
-                            t_stat = slope / sb if sb > 0 else 0.0
-                        else:
-                            t_stat = 0.0
-                            
-                        setattr(data, 'bei_t_stat_60d', float(t_stat))
+                # Approximate TIPS ≈ US10Y − 2.20% (current expected BEI)
+                data.tips_yield = round(data.us10y - 2.20, 2)
             except Exception as e:
-                self.errors.append(f"BEI composite calculation error: {e}")
+                self.errors.append(f"TIPS proxy calculation error: {e}")
 
     def fetch_sge_premium_history(self, period="3mo") -> pd.DataFrame:
         """
@@ -384,6 +429,182 @@ class DataFetcher:
         except Exception as e:
             self.errors.append(f"Historical premium fetch error: {e}")
             return df_result
+
+    def fetch_bei_history(self, period: str = "1y") -> dict:
+        """
+        Fetch DFII10 + DGS10 history for BEI trend chart.
+        Uses FRED official API if fred_api_key is provided, else falls back to CSV.
+        Uses automatic retry with common local proxy ports (7890, 10809, 1080) if GFW blocks it.
+        """
+        api_keys = _get_api_keys()
+        fred_key = api_keys.get("fred_api_key", "").strip()
+
+        # List of proxies to try automatically, starting with None (direct)
+        proxies_to_try = [
+            None,
+            {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"},      # Clash
+            {"http": "http://127.0.0.1:10809", "https": "http://127.0.0.1:10809"},    # v2rayN
+            {"http": "http://127.0.0.1:1080", "https": "http://127.0.0.1:1080"},      # Shadowsocks
+        ]
+
+        df_tips = pd.DataFrame()
+        df_us10y = pd.DataFrame()
+        success = False
+
+        if fred_key:
+            url_dfii10 = f"https://api.stlouisfed.org/fred/series/observations?series_id=DFII10&api_key={fred_key}&file_type=json&limit=300&sort_order=desc"
+            url_dgs10 = f"https://api.stlouisfed.org/fred/series/observations?series_id=DGS10&api_key={fred_key}&file_type=json&limit=300&sort_order=desc"
+            
+            for proxies in proxies_to_try:
+                try:
+                    resp_tips = requests.get(url_dfii10, proxies=proxies, timeout=10)
+                    resp_us10y = requests.get(url_dgs10, proxies=proxies, timeout=10)
+                    if resp_tips.status_code == 200 and resp_us10y.status_code == 200:
+                        obs_tips = [o for o in resp_tips.json().get("observations", []) if o["value"] != "."]
+                        obs_us10y = [o for o in resp_us10y.json().get("observations", []) if o["value"] != "."]
+                        
+                        df_tips = pd.DataFrame(obs_tips)[['date', 'value']].rename(columns={'date': 'DATE', 'value': 'DFII10'})
+                        df_us10y = pd.DataFrame(obs_us10y)[['date', 'value']].rename(columns={'date': 'DATE', 'value': 'DGS10'})
+                        
+                        for df, col in [(df_tips, 'DFII10'), (df_us10y, 'DGS10')]:
+                            df[col] = pd.to_numeric(df[col], errors='coerce')
+                            df['DATE'] = pd.to_datetime(df['DATE'])
+                            df.set_index('DATE', inplace=True)
+                            
+                        # Sort index chronologically because sort_order=desc puts newest first
+                        df_tips.sort_index(inplace=True)
+                        df_us10y.sort_index(inplace=True)
+                        success = True
+                        break
+                except Exception:
+                    continue
+
+        # Fallback to CSV if API key not present or failed
+        if not success:
+            url_dfii10_csv = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFII10"
+            url_dgs10_csv = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10"
+
+            resp_tips_csv = None
+            resp_us10y_csv = None
+
+            for proxies in proxies_to_try:
+                try:
+                    resp_tips_csv = requests.get(url_dfii10_csv, proxies=proxies, timeout=10)
+                    resp_us10y_csv = requests.get(url_dgs10_csv, proxies=proxies, timeout=10)
+                    if resp_tips_csv.status_code == 200 and resp_us10y_csv.status_code == 200:
+                        df_tips = pd.read_csv(io.StringIO(resp_tips_csv.text))
+                        df_us10y = pd.read_csv(io.StringIO(resp_us10y_csv.text))
+
+                        for df, col in [(df_tips, 'DFII10'), (df_us10y, 'DGS10')]:
+                            if col not in df.columns:
+                                raise ValueError(f"Missing column {col}")
+                            df[col] = df[col].replace('.', np.nan)
+                            df[col] = pd.to_numeric(df[col], errors='coerce')
+                            date_col = df.columns[0]
+                            df[date_col] = pd.to_datetime(df[date_col])
+                            df.set_index(date_col, inplace=True)
+                        
+                        success = True
+                        break
+                except Exception:
+                    continue
+
+        if not success:
+            self.errors.append("❌ FRED 数据获取失败：所有网络/代理尝试均超时。请确保已开启全局 VPN 或检查 API Key。")
+            return None
+
+        try:
+            df_macro = df_us10y.join(df_tips, how='inner').dropna()
+            if len(df_macro) < 5:
+                self.errors.append("BEI: 有效对其数据点不足。")
+                return None
+
+            df_macro['BEI'] = df_macro['DGS10'] - df_macro['DFII10']
+            df_macro = df_macro.tail(250)
+
+            return self._compute_bei_regression(df_macro)
+
+        except Exception as e:
+            self.errors.append(f"FRED 数据解析错误: {e}")
+            return None
+
+    def _compute_bei_regression(self, df_macro: pd.DataFrame) -> dict:
+        """Compute 60-day BEI linear regression slope and t-statistic."""
+        result = {
+            'df': df_macro,
+            'slope_60d': 0.0,
+            't_stat_60d': 0.0,
+        }
+
+        if len(df_macro) >= 60:
+            y = df_macro['BEI'].tail(60).values
+            x = np.arange(len(y))
+            slope, intercept = np.polyfit(x, y, 1)
+            result['slope_60d'] = float(slope)
+
+            n = len(x)
+            y_pred = slope * x + intercept
+            sse = np.sum((y - y_pred) ** 2)
+            if sse > 0:
+                se = np.sqrt(sse / (n - 2))
+                sb = se / np.sqrt(np.sum((x - np.mean(x)) ** 2))
+                result['t_stat_60d'] = float(slope / sb) if sb > 0 else 0.0
+
+        return result
+
+    def fetch_nasdaq_history(self, symbol: str = "^NDX", period: str = "1y") -> dict:
+        """
+        Fetch Nasdaq history and spot metrics via yfinance.
+        Suitable for deploy environments like Streamlit Cloud where there is no GFW.
+        Returns a dict with 'df' (history), 'spot', 'change', 'change_pct'.
+        """
+        result = {
+            'df': pd.DataFrame(),
+            'spot': 0.0,
+            'change': 0.0,
+            'change_pct': 0.0
+        }
+        
+        if not yf:
+            self.errors.append("yfinance library is not available for Nasdaq fetch.")
+            return result
+            
+        try:
+            # 1. Fetch History
+            df = yf.download(symbol, period=period, progress=False)
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            df.columns = [c.lower() for c in df.columns]
+            
+            if not df.empty and 'close' in df.columns:
+                df = df.dropna()
+                # Keep last 200 days
+                result['df'] = df.tail(200)[['close']]
+                
+            # 2. Fetch Spot & Change
+            ticker = yf.Ticker(symbol)
+            spot = ticker.fast_info.get("lastPrice", 0.0)
+            prev_close = ticker.fast_info.get("previousClose", 0.0)
+            
+            result['open'] = float(ticker.fast_info.get("open", 0.0))
+            result['day_high'] = float(ticker.fast_info.get("dayHigh", 0.0))
+            result['day_low'] = float(ticker.fast_info.get("dayLow", 0.0))
+            result['prev_close'] = float(prev_close)
+            result['year_high'] = float(ticker.fast_info.get("yearHigh", 0.0))
+            result['year_low'] = float(ticker.fast_info.get("yearLow", 0.0))
+            
+            if spot and spot > 0:
+                result['spot'] = float(spot)
+                if prev_close and prev_close > 0:
+                    change = spot - prev_close
+                    result['change'] = float(change)
+                    result['change_pct'] = float((change / prev_close) * 100)
+            
+            return result
+            
+        except Exception as e:
+            self.errors.append(f"Nasdaq fetch error ({symbol}): {e}")
+            return result
 
 
 if __name__ == "__main__":
