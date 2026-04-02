@@ -314,16 +314,16 @@ def render_market_data_input() -> MarketData:
     # Initialize session state for market data defaults if not present
     if "mkt_data" not in st.session_state:
         st.session_state.mkt_data = MarketData(
-            price_518660=5.3500, iopv_518660=5.3400, price_iaum=53.0000,
-            xau_usd=3020.00, sge_au9999=710.00, usd_cnh=7.2500,
-            usd_cnh_ma200=7.2200, tips_yield=1.83, us10y=4.25, rsi_14=52.0, kdj_j=48.0,
+            price_518660=0.0, iopv_518660=0.0, price_iaum=0.0,
+            xau_usd=0.0, sge_au9999=0.0, usd_cnh=0.0,
+            usd_cnh_ma200=0.0, tips_yield=0.0, us10y=0.0, rsi_14=0.0, kdj_j=0.0,
             ndx_spot=0.0
         )
     else:
         if not hasattr(st.session_state.mkt_data, "ndx_spot"):
             st.session_state.mkt_data.ndx_spot = 0.0
         if not hasattr(st.session_state.mkt_data, "us10y"):
-            st.session_state.mkt_data.us10y = 4.30
+            st.session_state.mkt_data.us10y = 0.0
             
     # Ensure individual widget keys exist for the first run to avoid 'key' vs 'value' conflict
     for k in ["xau_usd", "sge_au9999", "usd_cnh", "usd_cnh_ma200", "tips_yield", "us10y", "rsi_14", "kdj_j", "price_518660", "iopv_518660", "price_iaum", "ndx_spot"]:
